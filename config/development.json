@@ -1,0 +1,6 @@
+{
+    "name": "development: mayo-backend-service",
+    "mail": {
+        "host": "development-server"
+    }
+}
