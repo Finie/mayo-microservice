@@ -4,6 +4,9 @@ const morgan = require('morgan')
 
 const orders = require('./routes/orders')
 const authentication = require('./routes/auth')
+const server = require('./server/server')
+
+
 const app = express();
 
 app.use(express.json())
