@@ -2,7 +2,11 @@ const mysql = require('mysql')
 
 
 const connection = mysql.createConnection({
-   
+    host:"localhost",
+    database: 'mayodb',
+    user:'root',
+    password:"#@rdw0rk",
+    multipleStatements: true
 })
 
 
