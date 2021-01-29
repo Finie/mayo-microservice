@@ -6,14 +6,6 @@ const connection = require('../server/server')
 const router = new express.Router();
 
 
-const orders = [
-    {orderID: 1, deadline:"12/1/2021", cost:"$48", status:"pending"},
-    {orderID: 2, deadline:"12/1/2021", cost:"$80", status:"rejected"},
-    {orderID: 3, deadline:"12/1/2021", cost:"$4", status:"complete"},
-    {orderID: 4, deadline:"12/1/2021", cost:"$8", status:"pending"},
-    {orderID: 5, deadline:"12/1/2021", cost:"$480", status:"complete"}]
-
-
 router.get('/',(req, res)=>{
 
     connection.query("SELECT * FROM orders", (err, rows, fields) => {

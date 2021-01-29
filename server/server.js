@@ -1,20 +1,18 @@
-const mysql = require('mysql')
-
+const mysql = require("mysql");
+require("dotenv").config();
 
 const connection = mysql.createConnection({
-    host:"localhost",
-    database: 'mayodb',
-    user:'root',
-    password:"#@rdw0rk",
-    multipleStatements: true
-})
+  host: process.env.HOST,
+  database: process.env.DATABASE,
+  user: process.env.USER,
+  password: process.env.PASSWORD,
+  multipleStatements: true,
+});
 
+connection.connect((err) => {
+  if (!err) return console.log("Connecion established successfully...");
 
-connection.connect((err)=>{
-   if (!err)return   console.log("Connecion established successfully...")
-  
-   console.log(err);
-})
-
+  console.log(err);
+});
 
 module.exports = connection;

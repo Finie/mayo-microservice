@@ -45,10 +45,6 @@ router.post('/login',(req,res) => {
                     }
                 })
             }
-
-
-
-
         })
     })
 
@@ -64,8 +60,9 @@ router.post('/signup',(req, res) => {
     if(result.error) return res.status(400).send({  statu: 400, description: 'Bad request',  error:{message: result.error.details[0].message }})
     
    
-    bcrypt.genSalt(saltRounds).then(salt => {
+    bcrypt.genSalt(10).then(salt => {
         bcrypt.hash(req.body.password, salt).then(hash =>{ 
+
        const order = `INSERT INTO users  VALUES ("${Date.now()}", "${req.body.username}", "${req.body.useremail}", "${hash}", "users" , "authToken")`
 
     connection.query(order, (err, rows, fields)=>{
@@ -89,6 +86,7 @@ router.post('/signup',(req, res) => {
     })
         })
     })
+    .catch(err=> console.log("Failed", err))
 })
 
 
