@@ -2,9 +2,22 @@ const express = require("express");
 const paypal = require("paypal-rest-sdk");
 const JOI = require("joi");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_CLIENT_SECRET);
+const connection = require("../server/server");
+const multer = require("multer");
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "./upload/");
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + file.originalname);
+  },
+});
+const upload = multer({ storage: storage });
 
 const router = new express.Router();
 let paypalTotal = 0;
+let paypalData = {};
 
 paypal.configure({
   mode: process.env.PAYPAL_ENVIROMENT,
@@ -12,16 +25,18 @@ paypal.configure({
   client_secret: process.env.PAYPAL_CLIENT_SECRET,
 });
 
-router.post("/paypal", (req, res) => {
-  const result = validatePaypalPayload(req.body);
+router.post("/paypal", upload.single("file"), (req, res) => {
 
+  const result = validatePaypalPayload(req.body);
   if (result.error) {
     res.status(401).send({
       error: result.error.details,
     });
   }
-
-  paypalTotal = req.body.price;
+  
+  
+  paypalTotal = result.value.price;
+  paypalData = result.value;
 
   const create_payment_json = {
     intent: "sale",
@@ -29,7 +44,7 @@ router.post("/paypal", (req, res) => {
       payment_method: "paypal",
     },
     redirect_urls: {
-      return_url: "http://localhost:3000/api/payment/complete-paypal-payment",
+      return_url: "http://localhost:5000/api/payment/complete-paypal-payment",
       cancel_url: "http://cancel.url",
     },
     transactions: [
@@ -37,27 +52,28 @@ router.post("/paypal", (req, res) => {
         item_list: {
           items: [
             {
-              name: req.body.name,
-              sku: req.body.sku,
-              price: req.body.price,
+              name: result.value.topic,
+              sku: result.value.sku,
+              price: result.value.price,
               currency: "USD",
-              quantity: req.body.quantity,
+              quantity: 1,
             },
           ],
         },
         amount: {
           currency: "USD",
-          total: req.body.price,
+          total: result.value.price,
         },
-        description:`Your payment for ${req.body.name} to LegalEssayWriter was completed successfully`,
+        description: `Your payment for ${result.value.topic} to LegalEssayWriter was completed successfully`,
       },
     ],
   };
 
+
+
   paypal.payment.create(create_payment_json, function (error, payment) {
     if (error) {
-      res.send(error);
-      return;
+      return res.send(error);
     } else {
       for (let link = 0; link < payment.links.length; link++) {
         if (payment.links[link].rel === "approval_url") {
@@ -70,6 +86,7 @@ router.post("/paypal", (req, res) => {
           });
         }
       }
+      return;
     }
   });
 });
@@ -77,6 +94,8 @@ router.post("/paypal", (req, res) => {
 router.get("/complete-paypal-payment", (req, res) => {
   const payerId = req.query.PayerID;
   const paymentID = req.query.paymentId;
+
+  console.log(paypalData)
 
   const execute_payment_payload = {
     payer_id: payerId,
@@ -99,8 +118,30 @@ router.get("/complete-paypal-payment", (req, res) => {
         res.send(error);
         return;
       } else {
-        console.log(payment);
-        res.send(payment);
+        const {state, transactions, payer} = payment;
+
+        const paymentData = {
+          state: state,
+          status: payer.status,
+          payment_method: payer.payment_method,
+          description:transactions[0].description,
+          payer:{
+            payer_id:payer.payer_info.payer_id,
+            email:payer.payer_info.email,
+            first_name: payer.payer_info.first_name,
+            last_name: payer.payer_info.last_name
+          }
+        }
+
+        
+
+        
+        console.log(paymentData);
+        res.send(paymentData);
+
+
+
+
       }
     }
   );
@@ -110,12 +151,73 @@ router.get("/paypal-canceled", (req, res) => {
   res.send("Payment canceled");
 });
 
+router.post("/card-checkout", upload.single("file"), async (req, res) => {
+  console.log(req.file);
+  console.log(req.body);
+
+  return res.status(200).send({
+    status:"200",
+    description:"asdfghjkl ssdfgh"
+  });
+
+  try {
+    const customer = await stripe.customers.create({
+      email: token.email,
+      source: token.id,
+    });
+
+    const key = Date.now();
+
+    const charge = await stripe.charges.create({
+      amount: product.price * 100,
+      customer: customer.id,
+      currency: "USD",
+      receipt_email: token.email,
+      description: `You have made payment for ${order.topic} Essay`,
+    });
+
+    // const order = `INSERT INTO orders VALUES ( ${Date.now()}, ${
+    //   req.body.deadline
+    // }, 'file location','pending', ${req.body.userid}, ${req.body.cost})`;
+
+    // connection.query(order, (err, rows, fields) => {
+    //   if (err) return res.status(500).send(err);
+
+    //   res.status(200).send(rows);
+    // });
+
+    // const paymentInfo = {
+    //   status:charge.status,
+    //   funding:charge.data.source.funding,
+    //   fingerprint:charge.data.source.fingerprint,
+    //   receipt_url: charge.data.receipt_url
+
+    // }
+
+    res.send(charge);
+  } catch (error) {
+    res.status(401).send(error);
+  }
+});
+
 function validatePaypalPayload(payload) {
   const schema = JOI.object({
-    name: JOI.string().required(),
-    sku: JOI.string().required(),
+    file: JOI.any(),
+    academic_level: JOI.string().required(),
+    essay_type: JOI.string().required(),
+    subject: JOI.string().required(),
+    days: JOI.string(),
+    subision_time: JOI.string().required(),
+    number_of_pages: JOI.string().required(),
+    spacing: JOI.string().required(),
+    number_of_words: JOI.string().required(),
     price: JOI.string().required(),
-    quantity: JOI.number().integer().required(),
+    topic: JOI.string().required(),
+    style: JOI.string().required(),
+    instructions: JOI.string(),
+    references: JOI.string().required(),
+    sku: JOI.string().required(),
+    quantity: JOI.number().integer().required()
   });
 
   return schema.validate(payload);
