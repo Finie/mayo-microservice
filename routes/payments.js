@@ -10,14 +10,17 @@ const storage = multer.diskStorage({
     cb(null, "./upload/");
   },
   filename: function (req, file, cb) {
-    cb(null, Date.now() + file.originalname);
+    cb(null,"/"+Date.now() + file.originalname);
   },
 });
 const upload = multer({ storage: storage });
+const PaymentSchema = require("../models/paymentModel")
 
 const router = new express.Router();
 let paypalTotal = 0;
+let file_path = "";
 let paypalData = {};
+let paypalToken = "";
 
 paypal.configure({
   mode: process.env.PAYPAL_ENVIROMENT,
@@ -25,7 +28,10 @@ paypal.configure({
   client_secret: process.env.PAYPAL_CLIENT_SECRET,
 });
 
-router.post("/paypal", upload.single("file"), (req, res) => {
+const middleware = require("../middleware/Authenticate");
+
+router.post("/paypal", middleware, upload.single("file"), (req, res) => {
+  paypalToken = req.user._id;
 
   const result = validatePaypalPayload(req.body);
   if (result.error) {
@@ -33,10 +39,10 @@ router.post("/paypal", upload.single("file"), (req, res) => {
       error: result.error.details,
     });
   }
-  
-  
+
   paypalTotal = result.value.price;
   paypalData = result.value;
+  file_path = req.file.path;
 
   const create_payment_json = {
     intent: "sale",
@@ -45,7 +51,7 @@ router.post("/paypal", upload.single("file"), (req, res) => {
     },
     redirect_urls: {
       return_url: "http://localhost:5000/api/payment/complete-paypal-payment",
-      cancel_url: "http://cancel.url",
+      cancel_url: "http://localhost:5000/api/payment//paypal-canceled",
     },
     transactions: [
       {
@@ -69,7 +75,7 @@ router.post("/paypal", upload.single("file"), (req, res) => {
     ],
   };
 
-
+  
 
   paypal.payment.create(create_payment_json, function (error, payment) {
     if (error) {
@@ -91,11 +97,11 @@ router.post("/paypal", upload.single("file"), (req, res) => {
   });
 });
 
-router.get("/complete-paypal-payment", (req, res) => {
+router.get("/complete-paypal-payment", middleware, (req, res) => {
   const payerId = req.query.PayerID;
   const paymentID = req.query.paymentId;
 
-  console.log(paypalData)
+  console.log(file_path);
 
   const execute_payment_payload = {
     payer_id: payerId,
@@ -118,87 +124,143 @@ router.get("/complete-paypal-payment", (req, res) => {
         res.send(error);
         return;
       } else {
-        const {state, transactions, payer} = payment;
+        const { state, transactions, payer } = payment;
 
         const paymentData = {
           state: state,
           status: payer.status,
           payment_method: payer.payment_method,
-          description:transactions[0].description,
-          payer:{
-            payer_id:payer.payer_info.payer_id,
-            email:payer.payer_info.email,
+          description: transactions[0].description,
+          payer: {
+            payer_id: payer.payer_info.payer_id,
+            email: payer.payer_info.email,
             first_name: payer.payer_info.first_name,
-            last_name: payer.payer_info.last_name
-          }
-        }
+            last_name: payer.payer_info.last_name,
+          },
+        };
 
-        
+        const order = `INSERT INTO orders VALUES ( '${Date.now()}', '${
+          paypalData.days
+        }', "${file_path}",'Pending', ${paypalToken}, '${paypalData.price}','${
+          paypalData.academic_level
+        }','${paypalData.essay_type}','${paypalData.subject}','${
+          paypalData.days
+        }','${paypalData.subision_time}','${paypalData.number_of_pages}','${
+          paypalData.spacing
+        }','${paypalData.number_of_words}','${paypalData.topic}','${
+          paypalData.style
+        }','${paypalData.instructions}','${paypalData.references}','${
+          paymentData.payer.email
+        }','${paymentData.payer.payer_id}','${paymentData.payment_method}')`;
 
-        
-        console.log(paymentData);
-        res.send(paymentData);
+        connection.query(order, (err, rows, fields) => {
+          if (err) return res.status(500).send(err);
 
-
-
-
+          res.redirect(
+            `http://localhost:3000/success/${paymentData.description}`
+          );
+        });
       }
     }
   );
 });
 
-router.get("/paypal-canceled", (req, res) => {
-  res.send("Payment canceled");
+router.get("/paypal-canceled", middleware, (req, res) => {
+  res.redirect(`http://localhost:3000/failed/Payment was canceled`);
 });
 
-router.post("/card-checkout", upload.single("file"), async (req, res) => {
-  console.log(req.file);
-  console.log(req.body);
+router.post(
+  "/card-checkout",
+  middleware,
+  upload.single("file"),
+  async (req, res) => {
+    file_path = req.file.path;
 
-  return res.status(200).send({
-    status:"200",
-    description:"asdfghjkl ssdfgh"
-  });
+    const { tokeny, producty, ordery } = req.body;
 
-  try {
-    const customer = await stripe.customers.create({
-      email: token.email,
-      source: token.id,
-    });
+    const product = JSON.parse(producty);
+    const order = JSON.parse(ordery);
+    const token = JSON.parse(tokeny);
 
-    const key = Date.now();
+    try {
+      const customer = await stripe.customers.create({
+        email: token.email,
+        source: token.id,
+      });
 
-    const charge = await stripe.charges.create({
-      amount: product.price * 100,
-      customer: customer.id,
-      currency: "USD",
-      receipt_email: token.email,
-      description: `You have made payment for ${order.topic} Essay`,
-    });
+      const charge = await stripe.charges.create({
+        amount: (Math.round(product.price * 100) / 100) * 100,
+        customer: customer.id,
+        currency: "USD",
+        receipt_email: token.email,
+        description: `Your payment for ${order.topic} to LegalEssayWriter was completed successfully`,
+      });
 
-    // const order = `INSERT INTO orders VALUES ( ${Date.now()}, ${
-    //   req.body.deadline
-    // }, 'file location','pending', ${req.body.userid}, ${req.body.cost})`;
+      const paymentData = {
+        description: charge.description,
+        paymentEmail: charge.receipt_email,
+        payment_method: charge.payment_method_details.type,
+        paymentId: charge.id,
+      };
 
-    // connection.query(order, (err, rows, fields) => {
-    //   if (err) return res.status(500).send(err);
 
-    //   res.status(200).send(rows);
-    // });
+      const paymentPayload = new PaymentSchema({
+        paymentMethod:  paymentData.payment_method,
+        payeriD: paymentData.paymentId,
+        references: order.references,
+        instructions: order.instructions,
+        style: order.style,
+        topic: order.topic,
+        number_of_words: product.number_of_words,
+        spacing: product.spacing,
+        number_of_pages: product.number_of_pages,
+        subject: product.subject,
+        essay_type: product.essay_type,
+        academic_level:  product.academic_level,
+        status: "Pending",
+        deadline: product.days,
+        subision_time: product.subision_time,
+        price: product.price,
+        payerEmail: paymentData.paymentEmail,
+        paymentToken: paymentData.paymentId,
+        file: file_path,
+        userId: req.user._id
+      });
 
-    // const paymentInfo = {
-    //   status:charge.status,
-    //   funding:charge.data.source.funding,
-    //   fingerprint:charge.data.source.fingerprint,
-    //   receipt_url: charge.data.receipt_url
 
-    // }
+      try {
+        const paymentI = await paymentPayload.save();
 
-    res.send(charge);
-  } catch (error) {
-    res.status(401).send(error);
+        res.status(200).send({
+          status: "success",
+          description: "Payment completed successfully",
+          data: {
+            description: paymentData.description,
+          },
+        });
+        
+      } catch (error) {
+
+        console.log(err);
+          return res.status(200).send({
+            status: 500,
+            description: "something went wrong while saving data",
+            error: err,
+          });
+
+
+      }
+
+     
+
+    } catch (error) {
+      console.log(error);
+      res.status(401).send(error);
+    }
   }
-});
+
+  
+);
 
 function validatePaypalPayload(payload) {
   const schema = JOI.object({
@@ -217,7 +279,7 @@ function validatePaypalPayload(payload) {
     instructions: JOI.string(),
     references: JOI.string().required(),
     sku: JOI.string().required(),
-    quantity: JOI.number().integer().required()
+    quantity: JOI.number().integer().required(),
   });
 
   return schema.validate(payload);

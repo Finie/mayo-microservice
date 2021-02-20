@@ -1,108 +1,184 @@
-const Joi = require('joi')
-const express = require('express')
-const connection = require('../server/server')
-const bcrypt = require('bcrypt');
+const Joi = require("joi");
+const express = require("express");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
+const connection = require("../server/server");
+const bcrypt = require("bcrypt");
 const saltRounds = 10;
-const router = express.Router()
+const router = express.Router();
+const UserSchema = require("../models/userModel");
+const middleware = require("../middleware/Authenticate");
 
-router.post('/login',(req,res) => {
+router.post("/login", async (req, res) => {
+  const result = signupValidation(req.body);
 
-    signupValidation(req.body)
+  if (result.error)
+    return res.status(400).send({
+      status: "failed",
+      description: "Bad Request",
+      data: null,
+      error: {
+        message: result.error.details[0].message,
+      },
+    });
 
-    const query = `SELECT * FROM mayodb.users WHERE useremail = "${req.body.useremail}"`
+  let user = await UserSchema.findOne({ userEmail: req.body.useremail });
 
-    connection.query(query, (err, rows, fields) =>{
+  if (!user)
+    return res.status(400).send({
+      status: "Request Failed",
+      description: "Bad request",
+      data: null,
+      error: { message: "Invalid email or password" },
+    });
 
-        if(err) return res.send(err)
+  const isPasswordMatch = await bcrypt.compare(
+    req.body.password,
+    user.userPassword
+  );
 
-        if(!rows[0]) return  res.status(404).send({
-            status: "Request Failed",
-            description: "user with such username does not exist",
-            data: {
-                message: "user with such username does not exist"
-            }
-        })
-        
-        bcrypt.compare(req.body.password, rows[0].password).then(result =>{
+  if (!isPasswordMatch)
+    return res.status(400).send({
+      status: "Request Failed",
+      description: "Bad request",
+      data: null,
+      error: { message: "Invalid email or password" },
+    });
 
+  const token = jwt.sign(
+    {
+      _id: user._id,
+      role: user.isAdmin,
+      email: user.userEmail,
+    },
+    process.env.LEGALESSAYWRITERS_PRIVATE_KEY
+  );
 
-            if(result){res.status(200).send({
-                    status: "Request successful",
-                    description: "login was successful",
-                    data: {
-                        message: "Login was successful"
-                    }
-                })} 
+  return res.status(200).send({
+    status: "request successful",
+    description: "login successful",
+    data: {
+      token: token,
+      role: user.isAdmin ? "Admin" : "User",
+      username: user.userName,
+      email: user.userEmail,
+    },
+    error: null,
+  });
+});
 
+router.post("/signup", async (req, res) => {
+  const result = signupValidation(req.body);
 
+  if (result.error)
+    return res.status(200).send({
+      statu: 400,
+      description: "Bad request",
+      error: { message: result.error.details[0].message },
+    });
 
-            else{
-                res.status(400).send({
-                    status: "Request Failed",
-                    description: "wrong username or password",
-                    data: {
-                        message: "Wrong username or password"
-                    }
-                })
-            }
-        })
-    })
+  const salt = await bcrypt.genSalt(10);
+  const hash = await bcrypt.hash(req.body.password, salt);
 
+  const userData = new UserSchema({
+    userName: req.body.username,
+    userEmail: req.body.useremail,
+    isAdmin: false,
+    userPassword: hash,
+  });
 
-})
+  try {
+    const savedUserInfo = await userData.save();
 
+    const token = jwt.sign(
+      {
+        _id: savedUserInfo._id,
+        role: savedUserInfo.isAdmin,
+        email: savedUserInfo.userEmail,
+      },
+      process.env.LEGALESSAYWRITERS_PRIVATE_KEY
+    );
 
+    res.status(200).send({
+      status: "success",
+      description: "Sign up successful",
+      data: {
+        token: token,
+        email: savedUserInfo.userEmail,
+        username: savedUserInfo.userName,
+        role: savedUserInfo.isAdmin ? "Admin" : "User",
+      },
+    });
+  } catch (error) {
+    return res.status(200).send({
+      status: "Request Failed",
+      description: "Sign up was not successful",
+      error: {
+        description: "User with that email already exists",
+      },
+    });
+  }
+});
 
-router.post('/signup',(req, res) => {
+router.get("/get-all-users", middleware, async (req, res) => {
+  const users = await UserSchema.find().select("-userPassword");
 
-    const result =  signupValidation(req.body)
-    
-    if(result.error) return res.status(400).send({  statu: 400, description: 'Bad request',  error:{message: result.error.details[0].message }})
-    
-   
-    bcrypt.genSalt(10).then(salt => {
-        bcrypt.hash(req.body.password, salt).then(hash =>{ 
+  res.status(200).send({
+    status: "Request successful",
+    description: "fetch successful",
+    data: users,
+  });
+});
 
-       const order = `INSERT INTO users  VALUES ("${Date.now()}", "${req.body.username}", "${req.body.useremail}", "${hash}", "users" , "authToken")`
+router.post("/delete-user", middleware, async (req, res) => {
+  try {
+    const deleted = await UserSchema.deleteOne({ _id: req.body.userId });
+    res.status(200).send({
+      status: "request Successful",
+      description: "user deleted successfully",
+      data: deleted,
+    });
+  } catch (error) {
+    return res.status(200).send({
+      status: "400",
+      error: error,
+    });
+  }
+});
 
-    connection.query(order, (err, rows, fields)=>{
+router.post("/update-user", middleware, async (req, res) => {
+  try {
+    const updateUser = await UserSchema.updateOne(
+      { _id: req.body.userid },
+      { $set: { isAdmin: req.body.isAdmin } }
+    );
 
-        if(err.errno === 1062) return res.status(500).send({
-            status: "Request Failed",
-            description: "Sign up was not successful",
-            data: {
-                message: "User with that email already exists"
-            }
-        })
+    res.status(200).send({
+      status: "Request Successful",
+      description: "User updated",
+      data: updateUser,
+      error: null,
+    });
+  } catch (error) {
+    res.status(200).send({
+      status: "Failed ",
+      description: "Update was not successful",
+      error: error,
+    });
+  }
+});
 
-        res.status(200).send({
-            status: "Request Successful",
-            description: "Sign up was successful",
-            data: {
-                message: "Account created successfully"
-            }
-        })
-
-    })
-        })
-    })
-    .catch(err=> console.log("Failed", err))
-})
-
-
- async function encrypt(password) {
-    return await security.encryptPassword(password)    
+async function encrypt(password) {
+  return await security.encryptPassword(password);
 }
-
 
 function signupValidation(user) {
-    const schema = Joi.object( {
-        username: Joi.string(),
-        useremail: Joi.string().email().required(),
-        password: Joi.string().min(8).required()
-    })   
-    return schema.validate(user);
+  const schema = Joi.object({
+    username: Joi.string(),
+    useremail: Joi.string().email().required(),
+    password: Joi.string().min(8).required(),
+  });
+  return schema.validate(user);
 }
-
 
 module.exports = router;

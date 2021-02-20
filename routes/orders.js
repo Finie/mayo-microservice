@@ -1,135 +1,192 @@
-const Joi = require('joi')
-const express = require ('express');
-const connection = require('../server/server')
+const Joi = require("joi");
+const express = require("express");
+const connection = require("../server/server");
+const OrderSchema = require("../models/paymentModel");
 
+const middleware = require("../middleware/Authenticate");
 
 const router = new express.Router();
 
+router.get("/all", middleware, async (req, res) => {
 
-router.get('/',(req, res)=>{
+ console.log(req.user.role);
 
-    connection.query("SELECT * FROM orders", (err, rows, fields) => {
-        if(err) return res.status(500).send(err)
+ if(req.user.role){
+   const orders = await OrderSchema.find();
+   res.status(200).send({
+     status: "Request Successful",
+     description: "Order fetch Successful",
+     data: orders,
+     error: null,
+   });
+ }
 
-        res.status(200).send(rows)
-    })
-
-})
-
-
-router.get('/:id',(req, res) =>{
-
-   const order = orders.find(c => c.orderID === parseInt(req.params.id))
-   
-   if(!order) return res.status(404).send({status: 404, description: "item not found", error: {  message: "Order with the given ID was not found"}})//404
-
-   res.status(200).send(order)
-})
-
-
-router.post('/',(req, res) => {
-
-    const result = validateOrder(req.body)
-    
-    if(result.error) return res.status(400).send({  statu: 400, description: 'Bad request',  error:{message: result.error.details[0].message }})
-    
-    const order = `INSERT INTO orders VALUES ( ${Date.now()}, ${req.body.deadline}, 'file location','pending', ${req.body.userid}, ${req.body.cost})`
-
-    
-    connection.query(order, (err, rows, fields)=>{
-
-        if(err) return res.status(500).send(err)
-
-        res.status(200).send(rows)
-
-    })
+ else{
+  res.status(403).send({
+    status: "Forbidden ",
+    description: "Access denied",
+    error: {
+      message: "You are not allowed to access this resource"
+    },
+  });
+ }
 
 
-})
 
-router.put('/',(req, res)=>{
+});
 
-    const result = ValidateUpdate(req.body)
-    if(result.error) return res.status(400).send({statu: 400,description: 'Bad request',error: { message: result.error.details[0].message }} )
-    
-    
-    
-    const order = `SELECT * FROM orders WHERE idorder = ${req.body.orderid}` 
- 
-    // updtae the order
-    // 
-    // order.deadline = req.body.deadline,
-    // order.cost = req.body.cost
+router.get("/", middleware, async (req, res) => {
 
-    connection.query(order, (err, rows, fields)=>{
-        
-        if(!rows[0]) return res.status(404).send({status: "Request failed", description: "order not found", error: { message: "Order with the given ID was not found"}})
+  const orders = await OrderSchema.find({userId: req.user._id});
+  res.status(200).send({
+    status: "Request Successful",
+    description: "Order fetch Successful",
+    data: orders,
+    error: null,
+  });
 
-        const updateQuery = `UPDATE orders SET deadline = ${req.body.deadline}, cost = ${req.body.cost} WHERE idorder = ${req.body.orderid}`
-
-        connection.query(updateQuery, (err, rows, fields) => {
-
-            if(err) return res.send(err)
-
-            if(rows.affectedRows > 0) return res.status(200).send(rows);
-
-            res.status(200).send(fields)
-
-        })
+});
 
 
-    })
+router.post("/", (req, res) => {
+  const result = validateOrder(req.body);
+
+  if (result.error)
+    return res.status(400).send({
+      statu: 400,
+      description: "Bad request",
+      error: { message: result.error.details[0].message },
+    });
+
+  const order = `INSERT INTO orders VALUES ( ${Date.now()}, ${
+    req.body.deadline
+  }, 'file location','pending', ${req.body.userid}, ${req.body.cost})`;
+
+  connection.query(order, (err, rows, fields) => {
+    if (err) return res.status(500).send(err);
+
+    res.status(200).send(rows);
+  });
+});
 
 
-})
 
 
-router.delete('/:id', (req, res) => {
 
-    // Handle delete in future fro this method
 
-    const order = orders.find(c => c.orderID === parseInt(req.params.id))
-   
-    if(!order) return res.status(404).send({  status: 404,   description: "item not found",  error: {  message: "Order with the given ID was not found" }
-    })
+router.put("/", (req, res) => {
+  const result = ValidateUpdate(req.body);
+  if (result.error)
+    return res.status(400).send({
+      statu: 400,
+      description: "Bad request",
+      error: { message: result.error.details[0].message },
+    });
 
-    // delete
-    const index = orders.indexOf(order)
-    orders.splice(index, 1)
+  const order = `SELECT * FROM orders WHERE idorder = ${req.body.orderid}`;
+
+  connection.query(order, (err, rows, fields) => {
+    if (!rows[0])
+      return res.status(404).send({
+        status: "Request failed",
+        description: "order not found",
+        error: { message: "Order with the given ID was not found" },
+      });
+
+    const updateQuery = `UPDATE orders SET deadline = ${req.body.deadline}, cost = ${req.body.cost} WHERE idorder = ${req.body.orderid}`;
+
+    connection.query(updateQuery, (err, rows, fields) => {
+      if (err) return res.send(err);
+
+      if (rows.affectedRows > 0) return res.status(200).send(rows);
+
+      res.status(200).send(fields);
+    });
+  });
+});
+
+
+
+
+
+router.post("/update-order", middleware, async(req, res) => {
+
+  try {
+  
+    const updateOrder = await OrderSchema.updateOne({_id: req.body.orderId},{ $set: { status:  req.body.status,}});
+  
     res.status(200).send({
-        status: "success",
-        description: "Order was deleted successfully",
-        data: order
-    })
+      status: "Request Successful",
+      description: "User updated",
+      data: updateOrder,
+      error: null,
+    });
+  
+    
+  } catch (error) {
+    res.status(200).send({
+      status: "Success",
+      description: "nothing was updated",
+      error: error
+    });
+  }
+});
 
-    //END DELETE
-})
+
+
+
+
+
+
+router.post("/delete-order", middleware, (req, res) => {
+
+  const deleteStatement = `DELETE FROM orders WHERE idorder=${req.body.idorder}`;
+  connection.query(deleteStatement, (err, rows, fields) => {
+    if (err)
+      return res.status(200).send({
+        status: "400",
+        error: err,
+      });
+
+    if (rows.affectedRows > 0) {
+      res.status(200).send({
+        status: "request Successful",
+        description: "order deleted successfully",
+      });
+    }
+  });
+});
+
+
+
+
 
 
 function ValidateUpdate(order) {
-
-    const schema = Joi.object( {
-        deadline: Joi.date().raw().required(),
-        cost: Joi.string().required(),
-        userid: Joi.string().min(1).required(),
-        orderid: Joi.string().min(1).required()
-    })
-    return schema.validate(order);
-    
+  const schema = Joi.object({
+    deadline: Joi.date().raw().required(),
+    cost: Joi.string().required(),
+    userid: Joi.string().min(1).required(),
+    orderid: Joi.string().min(1).required(),
+  });
+  return schema.validate(order);
 }
+
+
+
+
 
 function validateOrder(order) {
+  const schema = Joi.object({
+    deadline: Joi.date().raw().required(),
+    cost: Joi.string().required(),
+    userid: Joi.string().min(1).required(),
+  });
 
-    const schema = Joi.object( {
-        deadline: Joi.date().raw().required(),
-        cost: Joi.string().required(),
-        userid: Joi.string().min(1).required()
-    })
-
-
-    return schema.validate(order);
-
+  return schema.validate(order);
 }
+
+
 
 
 module.exports = router;
