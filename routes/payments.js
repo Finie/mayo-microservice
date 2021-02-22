@@ -10,18 +10,17 @@ const storage = multer.diskStorage({
     cb(null, "./upload/");
   },
   filename: function (req, file, cb) {
-    cb(null,"/"+Date.now() + file.originalname);
+    cb(null, "/" + Date.now() + file.originalname);
   },
 });
 const upload = multer({ storage: storage });
-const PaymentSchema = require("../models/paymentModel")
+const PaymentSchema = require("../models/paymentModel");
 
 const router = new express.Router();
 let paypalTotal = 0;
 let file_path = "";
 let paypalData = {};
 let paypalToken = "";
-
 paypal.configure({
   mode: process.env.PAYPAL_ENVIROMENT,
   client_id: process.env.PAYPAL_ID,
@@ -29,10 +28,12 @@ paypal.configure({
 });
 
 const middleware = require("../middleware/Authenticate");
+const { response } = require("express");
 
 router.post("/paypal", middleware, upload.single("file"), (req, res) => {
   paypalToken = req.user._id;
 
+  
   const result = validatePaypalPayload(req.body);
   if (result.error) {
     res.status(401).send({
@@ -75,8 +76,6 @@ router.post("/paypal", middleware, upload.single("file"), (req, res) => {
     ],
   };
 
-  
-
   paypal.payment.create(create_payment_json, function (error, payment) {
     if (error) {
       return res.send(error);
@@ -97,7 +96,7 @@ router.post("/paypal", middleware, upload.single("file"), (req, res) => {
   });
 });
 
-router.get("/complete-paypal-payment", middleware, (req, res) => {
+router.get("/complete-paypal-payment", async (req, res) => {
   const payerId = req.query.PayerID;
   const paymentID = req.query.paymentId;
 
@@ -115,16 +114,22 @@ router.get("/complete-paypal-payment", middleware, (req, res) => {
     ],
   };
 
+  let paymentPayload = null;
+
   paypal.payment.execute(
     paymentID,
     execute_payment_payload,
     function (error, payment) {
+      
+
       if (error) {
         console.log(error);
         res.send(error);
         return;
       } else {
         const { state, transactions, payer } = payment;
+
+        
 
         const paymentData = {
           state: state,
@@ -139,34 +144,55 @@ router.get("/complete-paypal-payment", middleware, (req, res) => {
           },
         };
 
-        const order = `INSERT INTO orders VALUES ( '${Date.now()}', '${
-          paypalData.days
-        }', "${file_path}",'Pending', ${paypalToken}, '${paypalData.price}','${
-          paypalData.academic_level
-        }','${paypalData.essay_type}','${paypalData.subject}','${
-          paypalData.days
-        }','${paypalData.subision_time}','${paypalData.number_of_pages}','${
-          paypalData.spacing
-        }','${paypalData.number_of_words}','${paypalData.topic}','${
-          paypalData.style
-        }','${paypalData.instructions}','${paypalData.references}','${
-          paymentData.payer.email
-        }','${paymentData.payer.payer_id}','${paymentData.payment_method}')`;
-
-        connection.query(order, (err, rows, fields) => {
-          if (err) return res.status(500).send(err);
-
-          res.redirect(
-            `http://localhost:3000/success/${paymentData.description}`
-          );
+        paymentPayload = new PaymentSchema({
+          paymentMethod: paymentData.payment_method,
+          payeriD: paymentData.payer.payer_id,
+          references: paypalData.references,
+          instructions: paypalData.instructions,
+          style: paypalData.style,
+          topic: paypalData.topic,
+          number_of_words: paypalData.number_of_pages,
+          spacing: paypalData.spacing,
+          number_of_pages: paypalData.number_of_pages,
+          subject: paypalData.subject,
+          essay_type: paypalData.essay_type,
+          academic_level: paypalData.academic_level,
+          status: "Pending",
+          deadline: paypalData.days,
+          subision_time: paypalData.subision_time,
+          price: paypalData.price,
+          payerEmail: paymentData.payer.email,
+          paymentToken: paypalToken,
+          file: file_path,
+          userId: paypalToken,
         });
+
+         savePayment(paymentData.description, paymentPayload,res);
+      
+
       }
     }
   );
 });
 
+async function savePayment(description, paymentPayload, res) {
+  try {
+    const paymentI = await paymentPayload.save();
+    
+    res.redirect(`https://legalessaywriters.com//success/${description}`);
+    
+  } catch (error) {
+    console.log(error);
+    return res.status(200).send({
+      status: 500,
+      description: "something went wrong while saving data",
+      error: err,
+    });
+  }
+}
+
 router.get("/paypal-canceled", middleware, (req, res) => {
-  res.redirect(`http://localhost:3000/failed/Payment was canceled`);
+  res.redirect(`https://legalessaywriters.com//failed/Payment was canceled`);
 });
 
 router.post(
@@ -203,9 +229,8 @@ router.post(
         paymentId: charge.id,
       };
 
-
       const paymentPayload = new PaymentSchema({
-        paymentMethod:  paymentData.payment_method,
+        paymentMethod: paymentData.payment_method,
         payeriD: paymentData.paymentId,
         references: order.references,
         instructions: order.instructions,
@@ -216,7 +241,7 @@ router.post(
         number_of_pages: product.number_of_pages,
         subject: product.subject,
         essay_type: product.essay_type,
-        academic_level:  product.academic_level,
+        academic_level: product.academic_level,
         status: "Pending",
         deadline: product.days,
         subision_time: product.subision_time,
@@ -224,9 +249,8 @@ router.post(
         payerEmail: paymentData.paymentEmail,
         paymentToken: paymentData.paymentId,
         file: file_path,
-        userId: req.user._id
+        userId: req.user._id,
       });
-
 
       try {
         const paymentI = await paymentPayload.save();
@@ -238,28 +262,19 @@ router.post(
             description: paymentData.description,
           },
         });
-        
       } catch (error) {
-
         console.log(err);
-          return res.status(200).send({
-            status: 500,
-            description: "something went wrong while saving data",
-            error: err,
-          });
-
-
+        return res.status(200).send({
+          status: 500,
+          description: "something went wrong while saving data",
+          error: err,
+        });
       }
-
-     
-
     } catch (error) {
       console.log(error);
       res.status(401).send(error);
     }
   }
-
-  
 );
 
 function validatePaypalPayload(payload) {
